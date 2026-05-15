@@ -1,0 +1,76 @@
+// 1. Fix forklift tracking - add this at top level
+let dispatchInProgress = 0;  // Track active dispatches
+
+// 2. Fix placeTamborInCamera
+function placeTamborInCamera(drumId, cam, time) {
+  // Remove the dead line: drumCounter;
+  drums[drumId] = drums[drumId] || {};
+  drums[drumId].cameraId = cam.id;
+  drums[drumId].storageStart = time;
+  updateCameraOccupancy(cam, cam.occupied + 1, time);
+  const storageMean = parseFloat(storageMeanInput.value);
+  const tStorage = expo(storageMean);
+  scheduleEvent(time + tStorage, 'storage_end', drumId);
+  log(`Hora ${time.toFixed(2)}: Tambor ${drumId} colocado en C${cam.id}...`);
+}
+
+// 3. Fix attemptDispatch to properly track forklifts
+function attemptDispatch(time) {
+  const nForks = parseInt(nForkliftsInput.value) || 1;
+  const availableForks = nForks - dispatchInProgress;
+  
+  while (readyQueue.length > 0 && availableForks > 0) {
+    const drumId = readyQueue.shift();
+    const drum = drums[drumId];
+    const cam = cameras.find(c => c.id === drum.cameraId);
+    if (!cam) continue;
+    
+    dispatchInProgress++;
+    const dispatchMean = parseFloat(dispatchMeanInput.value);
+    const tDispatch = expo(dispatchMean);
+    scheduleEvent(time + tDispatch, 'dispatch_end', drumId);
+    log(`Hora ${time.toFixed(2)}: Inicio despacho tambor ${drumId}...`);
+  }
+}
+
+// 4. Fix storage_end to remove occupancy when ready for dispatch
+case 'storage_end': {
+  const drumId = e.drumId;
+  const drum = drums[drumId];
+  if (!drum) break;
+  
+  const cam = cameras.find(c => c.id === drum.cameraId);
+  if (cam) {
+    // Remove from occupancy when leaving storage
+    updateCameraOccupancy(cam, cam.occupied - 1, t);
+  }
+  
+  readyQueue.push(drumId);
+  log(`Hora ${t.toFixed(2)}: Tambor ${drumId} listo para despacho...`);
+  attemptDispatch(t);
+  tryPlaceBlocked(t);
+  break;
+}
+
+// 5. Fix dispatch_end to decrement in-progress counter
+case 'dispatch_end': {
+  const drumId = e.drumId;
+  const drum = drums[drumId];
+  if (!drum) break;
+  
+  totalDespachados++;
+  const storageTime = (t - drum.storageStart);
+  storageTimes.push(storageTime);
+  delete drums[drumId];
+  
+  dispatchInProgress--;  // KEY: decrement counter
+  attemptDispatch(t);    // Try to dispatch next
+  tryPlaceBlocked(t);
+  log(`Hora ${t.toFixed(2)}: Despachado tambor ${drumId}`);
+  break;
+}
+
+// 6. Fix first drum scheduling
+drumCounter = 1;
+const firstArrivalTime = expo(1 / arrivalRate);
+scheduleEvent(firstArrivalTime, 'arrival', drumCounter);
